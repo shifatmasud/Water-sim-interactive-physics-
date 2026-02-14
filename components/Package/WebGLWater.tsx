@@ -186,7 +186,6 @@ const waterFragmentShader = `
     }
     
     float light_level = 1.0;
-    light_level *= 1.0 - 0.9 / pow(length(point - u_sphereCenter) / u_sphereRadius, 4.0);
     
     return wallColor * light_level;
   }
