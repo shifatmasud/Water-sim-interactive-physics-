@@ -8,6 +8,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { useTheme } from '../../Theme.tsx';
 
+interface WebGLWaterProps {
+  lightAzimuth: number;
+  lightElevation: number;
+  skyPreset: string;
+}
+
 // --- Shaders ---
 
 const commonVertexShader = `
@@ -268,8 +274,17 @@ const createTileTexture = () => {
     return texture;
 };
 
-const WebGLWater = () => {
+const skyPresets = {
+  default: { turbidity: 10, rayleigh: 2, mieCoefficient: 0.005, mieDirectionalG: 0.8 },
+  sunset: { turbidity: 20, rayleigh: 3, mieCoefficient: 0.002, mieDirectionalG: 0.95 },
+  cloudy: { turbidity: 50, rayleigh: 10, mieCoefficient: 0.05, mieDirectionalG: 0.6 },
+  night: { turbidity: 1, rayleigh: 0.1, mieCoefficient: 0.001, mieDirectionalG: 0.7 }
+};
+
+
+const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps) => {
   const mountRef = useRef<HTMLDivElement>(null);
+  const sceneObjects = useRef<any>({});
   const { theme } = useTheme();
 
   const waterSimulation = useMemo(() => {
@@ -367,7 +382,7 @@ const WebGLWater = () => {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.localClippingEnabled = true; // For reflection plane
+    renderer.localClippingEnabled = true;
     currentMount.appendChild(renderer.domElement);
     waterSimulation.init(renderer);
 
@@ -375,11 +390,7 @@ const WebGLWater = () => {
     controls.enableDamping = true;
     controls.target.set(0, 0, 0);
 
-    // --- Reflection setup ---
-    const reflectionRenderTarget = new THREE.WebGLRenderTarget(512, 512, {
-        format: THREE.RGBAFormat,
-        type: THREE.HalfFloatType,
-    });
+    const reflectionRenderTarget = new THREE.WebGLRenderTarget(512, 512, { format: THREE.RGBAFormat, type: THREE.HalfFloatType });
     const reflector = new THREE.PerspectiveCamera();
     const reflectorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
     const textureMatrix = new THREE.Matrix4();
@@ -392,26 +403,18 @@ const WebGLWater = () => {
     const target = new THREE.Vector3();
     const q = new THREE.Quaternion();
 
-    // --- Sky and Environment Map Setup ---
     const sky = new Sky();
     sky.scale.setScalar(100.0);
     const skyUniforms = sky.material.uniforms;
-    skyUniforms['turbidity'].value = 10;
-    skyUniforms['rayleigh'].value = 2;
-    skyUniforms['mieCoefficient'].value = 0.005;
-    skyUniforms['mieDirectionalG'].value = 0.8;
-
-    const sunPosition = new THREE.Vector3(1, 1, -1).normalize();
+    const sunPosition = new THREE.Vector3();
     skyUniforms['sunPosition'].value.copy(sunPosition);
 
-    // Generate cubemap from sky
     const cubeRenderTarget = new THREE.WebGLCubeRenderTarget(512);
     const cubeCamera = new THREE.CubeCamera(0.1, 1000, cubeRenderTarget);
     const skyScene = new THREE.Scene();
     skyScene.add(sky);
     cubeCamera.update(renderer, skyScene);
     const textureCube = cubeRenderTarget.texture;
-    
     scene.background = textureCube;
 
     const tilesTexture = createTileTexture();
@@ -433,7 +436,6 @@ const WebGLWater = () => {
         fragmentShader: waterFragmentShader,
     });
 
-    // --- Add lights to the scene ---
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
     scene.add(ambientLight);
     const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -441,29 +443,15 @@ const WebGLWater = () => {
     scene.add(directionalLight);
 
     const poolSize = 2;
-    // The pool material needs to render the BACK side of the faces to be visible from the inside.
     const poolMaterial = new THREE.MeshStandardMaterial({
-      map: tilesTexture,
-      envMap: textureCube,
-      roughness: 0.1,
-      metalness: 0.1,
-      side: THREE.BackSide // Render the inside of the box
+      map: tilesTexture, envMap: textureCube, roughness: 0.1, metalness: 0.1, side: THREE.BackSide
     });
-
     const poolGeo = new THREE.BoxGeometry(poolSize, 1, poolSize);
-
-    // Use an array of materials to make the top face invisible.
-    // The order is: right, left, top, bottom, front, back
     const poolMesh = new THREE.Mesh(poolGeo, [
-      poolMaterial, // right
-      poolMaterial, // left
-      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide }), // top (invisible)
-      poolMaterial, // bottom
-      poolMaterial, // front
-      poolMaterial  // back
+      poolMaterial, poolMaterial, new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide }),
+      poolMaterial, poolMaterial, poolMaterial
     ]);
     poolMesh.position.y = -0.5;
-    // The negative scale is no longer needed because THREE.BackSide handles the normal inversion for rendering.
     scene.add(poolMesh);
 
     const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
@@ -471,15 +459,9 @@ const WebGLWater = () => {
     scene.add(waterMesh);
 
     const sphereRadius = 0.25;
-    const sphere = new THREE.Mesh(
-      new THREE.SphereGeometry(sphereRadius, 32, 32),
-      new THREE.MeshStandardMaterial({ 
-        color: 0xffffff, 
-        envMap: textureCube, 
-        roughness: 0.05, 
-        metalness: 0.95 
-      })
-    );
+    const sphere = new THREE.Mesh(new THREE.SphereGeometry(sphereRadius, 32, 32), new THREE.MeshStandardMaterial({ 
+      color: 0xffffff, envMap: textureCube, roughness: 0.05, metalness: 0.95 
+    }));
     sphere.position.set(-0.3, -0.1, 0.3);
     scene.add(sphere);
     waterMaterial.uniforms.u_sphereRadius.value = sphereRadius;
@@ -492,7 +474,12 @@ const WebGLWater = () => {
     const dragPlane = new THREE.Plane();
     const waterPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-    const onPointerDown = (e: PointerEvent) => {
+    const onPointerDown = (e: PointerEvent) => { /* ... */ };
+    const onPointerMove = (e: PointerEvent) => { /* ... */ };
+    const onPointerUp = () => { /* ... */ };
+    
+    // Copy implementation from previous state for brevity
+    const onPointerDownImpl = (e: PointerEvent) => {
       pointer.x = (e.clientX / currentMount.clientWidth) * 2 - 1;
       pointer.y = -(e.clientY / currentMount.clientHeight) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
@@ -503,11 +490,10 @@ const WebGLWater = () => {
         dragPlane.setFromNormalAndCoplanarPoint(camera.getWorldDirection(new THREE.Vector3()).negate(), intersects[0].point);
       } else {
         isDraggingWater = true;
-        onPointerMove(e);
+        onPointerMoveImpl(e);
       }
     };
-
-    const onPointerMove = (e: PointerEvent) => {
+    const onPointerMoveImpl = (e: PointerEvent) => {
       if (!isDraggingSphere && !isDraggingWater) return;
       pointer.x = (e.clientX / currentMount.clientWidth) * 2 - 1;
       pointer.y = -(e.clientY / currentMount.clientHeight) * 2 + 1;
@@ -530,61 +516,49 @@ const WebGLWater = () => {
         }
       }
     };
-
-    const onPointerUp = () => { 
+    const onPointerUpImpl = () => { 
       isDraggingSphere = false; 
       isDraggingWater = false; 
       controls.enabled = true; 
     };
 
-    currentMount.addEventListener('pointerdown', onPointerDown);
-    currentMount.addEventListener('pointermove', onPointerMove);
-    window.addEventListener('pointerup', onPointerUp);
+    currentMount.addEventListener('pointerdown', onPointerDownImpl);
+    currentMount.addEventListener('pointermove', onPointerMoveImpl);
+    window.addEventListener('pointerup', onPointerUpImpl);
 
     const updateReflector = () => {
         reflectorWorldPosition.setFromMatrixPosition(waterMesh.matrixWorld);
         cameraWorldPosition.setFromMatrixPosition(camera.matrixWorld);
         rotationMatrix.extractRotation(waterMesh.matrixWorld);
-        
-        const normal = new THREE.Vector3(0, 1, 0); // Water plane normal
+        const normal = new THREE.Vector3(0, 1, 0);
         normal.applyMatrix4(rotationMatrix);
-
         view.subVectors(reflectorWorldPosition, cameraWorldPosition);
         view.reflect(normal).negate();
         view.add(reflectorWorldPosition);
-
         rotationMatrix.extractRotation(camera.matrixWorld);
         lookAtPosition.set(0, 0, -1);
         lookAtPosition.applyMatrix4(rotationMatrix);
         lookAtPosition.add(cameraWorldPosition);
-
         target.subVectors(reflectorWorldPosition, lookAtPosition);
         target.reflect(normal).negate();
         target.add(reflectorWorldPosition);
-
         reflector.position.copy(view);
         reflector.up.set(0, 1, 0);
         reflector.up.applyMatrix4(rotationMatrix);
         reflector.up.reflect(normal);
         reflector.lookAt(target);
-
         reflector.far = camera.far;
         reflector.near = camera.near;
         reflector.aspect = camera.aspect;
         reflector.fov = camera.fov;
         reflector.updateProjectionMatrix();
-        
-        textureMatrix.set(
-            0.5, 0.0, 0.0, 0.5,
-            0.0, 0.5, 0.0, 0.5,
-            0.0, 0.0, 0.5, 0.5,
-            0.0, 0.0, 0.0, 1.0
-        );
+        textureMatrix.set(0.5, 0.0, 0.0, 0.5, 0.0, 0.5, 0.0, 0.5, 0.0, 0.0, 0.5, 0.5, 0.0, 0.0, 0.0, 1.0);
         textureMatrix.multiply(reflector.projectionMatrix);
         textureMatrix.multiply(reflector.matrixWorldInverse);
     };
 
     const animate = () => {
+      requestAnimationFrame(animate);
       controls.update();
       if (oldSpherePos.distanceTo(sphere.position) > 0.001) {
         waterSimulation.moveSphere(
@@ -597,31 +571,30 @@ const WebGLWater = () => {
       waterSimulation.step();
       waterSimulation.updateNormals();
       
-      // Reflection Pass
       waterMesh.visible = false;
-      poolMaterial.side = THREE.FrontSide; // Render exterior for reflection
+      poolMaterial.side = THREE.FrontSide;
       updateReflector();
       renderer.clippingPlanes = [reflectorPlane];
       renderer.setRenderTarget(reflectionRenderTarget);
       renderer.render(scene, reflector);
       renderer.setRenderTarget(null);
       renderer.clippingPlanes = [];
-      poolMaterial.side = THREE.BackSide; // Render interior for main render
+      poolMaterial.side = THREE.BackSide;
       waterMesh.visible = true;
 
-      // Main Render Pass
       waterMaterial.uniforms.u_waterTexture.value = waterSimulation.getTexture();
       waterMaterial.uniforms.u_cameraPos.value.copy(camera.position);
       waterMaterial.uniforms.u_sphereCenter.value.copy(sphere.position);
       renderer.render(scene, camera);
-      requestAnimationFrame(animate);
     };
+    
+    sceneObjects.current = { sky, sunPosition, waterMaterial, ambientLight, directionalLight, cubeCamera, renderer, skyScene };
     const animId = requestAnimationFrame(animate);
 
     return () => {
-      currentMount.removeEventListener('pointerdown', onPointerDown);
-      currentMount.removeEventListener('pointermove', onPointerMove);
-      window.removeEventListener('pointerup', onPointerUp);
+      currentMount.removeEventListener('pointerdown', onPointerDownImpl);
+      currentMount.removeEventListener('pointermove', onPointerMoveImpl);
+      window.removeEventListener('pointerup', onPointerUpImpl);
       cancelAnimationFrame(animId);
       waterSimulation.dispose();
       reflectionRenderTarget.dispose();
@@ -629,6 +602,44 @@ const WebGLWater = () => {
       currentMount.removeChild(renderer.domElement);
     };
   }, [waterSimulation]);
+
+  useEffect(() => {
+    const { sky, sunPosition, waterMaterial, directionalLight } = sceneObjects.current;
+    if (!sky) return;
+
+    const elevationRad = THREE.MathUtils.degToRad(lightElevation);
+    const azimuthRad = THREE.MathUtils.degToRad(lightAzimuth);
+    
+    sunPosition.x = Math.cos(azimuthRad) * Math.cos(elevationRad);
+    sunPosition.y = Math.sin(elevationRad);
+    sunPosition.z = Math.sin(azimuthRad) * Math.cos(elevationRad);
+    sunPosition.normalize();
+    
+    sky.material.uniforms['sunPosition'].value.copy(sunPosition);
+    waterMaterial.uniforms.u_lightDir.value.copy(sunPosition);
+    directionalLight.position.copy(sunPosition);
+  }, [lightAzimuth, lightElevation]);
+
+  useEffect(() => {
+    const { sky, ambientLight, directionalLight, cubeCamera, renderer, skyScene } = sceneObjects.current;
+    if (!sky) return;
+
+    const preset = skyPresets[skyPreset as keyof typeof skyPresets] || skyPresets.default;
+    const isNight = skyPreset === 'night';
+    
+    sky.material.uniforms['turbidity'].value = preset.turbidity;
+    sky.material.uniforms['rayleigh'].value = preset.rayleigh;
+    sky.material.uniforms['mieCoefficient'].value = preset.mieCoefficient;
+    sky.material.uniforms['mieDirectionalG'].value = preset.mieDirectionalG;
+
+    ambientLight.intensity = isNight ? 0.1 : 0.7;
+    directionalLight.intensity = isNight ? 0.2 : 1.2;
+
+    if (renderer && skyScene) {
+        cubeCamera.update(renderer, skyScene);
+    }
+  }, [skyPreset]);
+
 
   return <div ref={mountRef} style={{ width: '100%', height: '100%', position: 'absolute', top: 0, left: 0 }} />;
 };

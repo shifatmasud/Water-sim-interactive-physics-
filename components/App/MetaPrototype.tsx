@@ -27,6 +27,9 @@ const MetaPrototype = () => {
   // -- App State --
   const [isPaused, setIsPaused] = useState(false);
   const [simulationConfig, setSimulationConfig] = useState({ gravity: true });
+  const [lightAzimuth, setLightAzimuth] = useState(315); // Horizontal angle (0-360)
+  const [lightElevation, setLightElevation] = useState(35); // Vertical angle (0-90)
+  const [skyPreset, setSkyPreset] = useState('default'); // 'default', 'sunset', etc.
   
   // -- Confetti State --
   const [confettiTrigger, setConfettiTrigger] = useState(0);
@@ -39,7 +42,7 @@ const MetaPrototype = () => {
 
   // --- Window Management ---
   const WINDOW_WIDTH = 400;
-  const CONTROL_PANEL_HEIGHT = 200; // Simplified panel
+  const CONTROL_PANEL_HEIGHT = 450;
   const CODE_PANEL_HEIGHT = 408;
   const CONSOLE_PANEL_HEIGHT = 200;
 
@@ -55,9 +58,9 @@ const MetaPrototype = () => {
   
   useEffect(() => {
     if (!isCodeFocused) {
-      setCodeText(JSON.stringify({ isPaused, ...simulationConfig }, null, 2));
+      setCodeText(JSON.stringify({ isPaused, lightAzimuth, lightElevation, skyPreset, ...simulationConfig }, null, 2));
     }
-  }, [isPaused, simulationConfig, isCodeFocused]);
+  }, [isPaused, lightAzimuth, lightElevation, skyPreset, simulationConfig, isCodeFocused]);
 
   // -- Actions --
 
@@ -104,6 +107,22 @@ const MetaPrototype = () => {
     logEvent(`Simulation toggled: ${isPaused ? 'On' : 'Off'}`);
   }
 
+  const handleAzimuthChange = (value: number) => {
+    setLightAzimuth(value);
+    logEvent(`Light Azimuth changed to ${value}°`);
+  };
+
+  const handleElevationChange = (value: number) => {
+    setLightElevation(value);
+    logEvent(`Light Elevation changed to ${value}°`);
+  };
+  
+  const handleSkyPresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const newPreset = e.target.value;
+    setSkyPreset(newPreset);
+    logEvent(`Sky preset changed to: ${newPreset}`);
+  };
+
   return (
     <div style={{
       width: '100vw',
@@ -115,7 +134,11 @@ const MetaPrototype = () => {
       <ThemeToggleButton />
       <Confetti trigger={confettiTrigger} />
 
-      <Stage />
+      <Stage 
+        lightAzimuth={lightAzimuth}
+        lightElevation={lightElevation}
+        skyPreset={skyPreset}
+      />
 
       {/* --- WINDOWS --- */}
       <AnimatePresence>
@@ -130,6 +153,12 @@ const MetaPrototype = () => {
             <ControlPanel
               isPaused={isPaused}
               onTogglePause={handleTogglePause}
+              lightAzimuth={lightAzimuth}
+              onAzimuthChange={handleAzimuthChange}
+              lightElevation={lightElevation}
+              onElevationChange={handleElevationChange}
+              skyPreset={skyPreset}
+              onSkyPresetChange={handleSkyPresetChange}
             />
           </FloatingWindow>
         )}
