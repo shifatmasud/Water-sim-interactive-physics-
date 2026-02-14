@@ -8,6 +8,7 @@ A log of all tasks, ideas, and progress for this project.
 -   [ ] Implement the caustics generation pass.
 -   [ ] Connect the `ControlPanel` to the live simulation parameters (e.g., toggle sphere physics).
 -   [ ] Add raycasting for moving the sphere.
+-   [ ] Add underwater scene.
 
 ## In Progress
 
@@ -17,6 +18,8 @@ A log of all tasks, ideas, and progress for this project.
 
 ## Done
 
+-   **[2024-05-24 09:00]**: Replaced light azimuth/elevation controls with direct XYZ position sliders for more intuitive directional light control. Added a specular intensity slider to control highlight brightness on the water surface.
+-   **[2024-05-23 11:15]**: Fixed water rendering artifact at grazing angles by toning down the specular highlight calculation to prevent color clipping.
 -   **[2024-05-21 13:15]**: Added a toggleable measurement overlay to the Stage, showing real-time dimensions for the button component.
 -   **[2024-05-21 13:00]**: Completed extensive refactor into granular components (new Core inputs, Package panels for each window, Section for Stage).
 -   **[2024-05-21 12:30]**: Refactored MetaPrototype into a modular component structure (App, Package, Section, Core) for better organization and scalability.

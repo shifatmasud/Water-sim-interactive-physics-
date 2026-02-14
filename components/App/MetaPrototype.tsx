@@ -2,7 +2,7 @@
  * @license
  * SPDX-License-Identifier: Apache-2.0
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { useTheme } from '../../Theme.tsx';
 import ThemeToggleButton from '../Core/ThemeToggleButton.tsx';
@@ -27,10 +27,20 @@ const MetaPrototype = () => {
   // -- App State --
   const [isPaused, setIsPaused] = useState(false);
   const [simulationConfig, setSimulationConfig] = useState({ gravity: true });
-  const [lightAzimuth, setLightAzimuth] = useState(315); // Horizontal angle (0-360)
-  const [lightElevation, setLightElevation] = useState(35); // Vertical angle (0-90)
+  const [lightPosition, setLightPosition] = useState({ x: 2, y: 3, z: -2 }); // XYZ position for light direction
   const [skyPreset, setSkyPreset] = useState('default'); // 'default', 'sunset', etc.
-  
+  const [lightIntensity, setLightIntensity] = useState(2.0);
+  const [specularIntensity, setSpecularIntensity] = useState(2.0);
+  const [useCustomWaterColor, setUseCustomWaterColor] = useState(false);
+  const [waterColorShallow, setWaterColorShallow] = useState('#aaddff'); // Light cyan
+  const [waterColorDeep, setWaterColorDeep] = useState('#005577'); // Dark cyan
+
+  // -- Direct API ref for real-time updates --
+  const sceneApiRef = useRef<{ 
+    setLightIntensity?: (v: number) => void; 
+    setSpecularIntensity?: (v: number) => void; 
+  } | null>(null);
+
   // -- Confetti State --
   const [confettiTrigger, setConfettiTrigger] = useState(0);
 
@@ -42,7 +52,7 @@ const MetaPrototype = () => {
 
   // --- Window Management ---
   const WINDOW_WIDTH = 400;
-  const CONTROL_PANEL_HEIGHT = 450;
+  const CONTROL_PANEL_HEIGHT = 600;
   const CODE_PANEL_HEIGHT = 408;
   const CONSOLE_PANEL_HEIGHT = 200;
 
@@ -58,9 +68,10 @@ const MetaPrototype = () => {
   
   useEffect(() => {
     if (!isCodeFocused) {
-      setCodeText(JSON.stringify({ isPaused, lightAzimuth, lightElevation, skyPreset, ...simulationConfig }, null, 2));
+      setCodeText(JSON.stringify({ isPaused, lightPosition, skyPreset, lightIntensity, specularIntensity, useCustomWaterColor, waterColorShallow, waterColorDeep, ...simulationConfig }, null, 2));
     }
-  }, [isPaused, lightAzimuth, lightElevation, skyPreset, simulationConfig, isCodeFocused]);
+  }, [isPaused, lightPosition, skyPreset, lightIntensity, specularIntensity, useCustomWaterColor, waterColorShallow, waterColorDeep, simulationConfig, isCodeFocused]);
+
 
   // -- Actions --
 
@@ -107,14 +118,9 @@ const MetaPrototype = () => {
     logEvent(`Simulation toggled: ${isPaused ? 'On' : 'Off'}`);
   }
 
-  const handleAzimuthChange = (value: number) => {
-    setLightAzimuth(value);
-    logEvent(`Light Azimuth changed to ${value}°`);
-  };
-
-  const handleElevationChange = (value: number) => {
-    setLightElevation(value);
-    logEvent(`Light Elevation changed to ${value}°`);
+  const handleLightPositionChange = (axis: 'x' | 'y' | 'z', value: number) => {
+    setLightPosition(prev => ({ ...prev, [axis]: value }));
+    logEvent(`Light Position ${axis.toUpperCase()} changed to ${value.toFixed(1)}`);
   };
   
   const handleSkyPresetChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -122,6 +128,43 @@ const MetaPrototype = () => {
     setSkyPreset(newPreset);
     logEvent(`Sky preset changed to: ${newPreset}`);
   };
+
+  // --- Real-time updates (no re-render) ---
+  const handleLightIntensityUpdate = (value: number) => {
+    sceneApiRef.current?.setLightIntensity?.(value);
+  };
+  const handleSpecularIntensityUpdate = (value: number) => {
+    sceneApiRef.current?.setSpecularIntensity?.(value);
+  };
+
+  // --- State updates on commit (re-renders for UI sync) ---
+  const handleLightIntensityCommit = (value: number) => {
+    setLightIntensity(value);
+    logEvent(`Light intensity committed: ${value.toFixed(1)}`);
+  };
+  const handleSpecularIntensityCommit = (value: number) => {
+    setSpecularIntensity(value);
+    logEvent(`Specular intensity committed: ${value.toFixed(1)}`);
+  };
+
+  const handleToggleCustomWaterColor = () => {
+      const newValue = !useCustomWaterColor;
+      setUseCustomWaterColor(newValue);
+      logEvent(`Custom water color toggled: ${newValue ? 'On' : 'Off'}`);
+  };
+
+  const handleWaterColorShallowChange = (e: any) => {
+      const newColor = e.target.value;
+      setWaterColorShallow(newColor);
+      logEvent(`Shallow water color changed to ${newColor}`);
+  };
+
+  const handleWaterColorDeepChange = (e: any) => {
+      const newColor = e.target.value;
+      setWaterColorDeep(newColor);
+      logEvent(`Deep water color changed to ${newColor}`);
+  };
+
 
   return (
     <div style={{
@@ -135,9 +178,14 @@ const MetaPrototype = () => {
       <Confetti trigger={confettiTrigger} />
 
       <Stage 
-        lightAzimuth={lightAzimuth}
-        lightElevation={lightElevation}
+        lightPosition={lightPosition}
         skyPreset={skyPreset}
+        lightIntensity={lightIntensity}
+        specularIntensity={specularIntensity}
+        useCustomWaterColor={useCustomWaterColor}
+        waterColorShallow={waterColorShallow}
+        waterColorDeep={waterColorDeep}
+        sceneApiRef={sceneApiRef}
       />
 
       {/* --- WINDOWS --- */}
@@ -153,12 +201,22 @@ const MetaPrototype = () => {
             <ControlPanel
               isPaused={isPaused}
               onTogglePause={handleTogglePause}
-              lightAzimuth={lightAzimuth}
-              onAzimuthChange={handleAzimuthChange}
-              lightElevation={lightElevation}
-              onElevationChange={handleElevationChange}
+              lightPosition={lightPosition}
+              onLightPositionChange={handleLightPositionChange}
               skyPreset={skyPreset}
               onSkyPresetChange={handleSkyPresetChange}
+              lightIntensity={lightIntensity}
+              onLightIntensityUpdate={handleLightIntensityUpdate}
+              onLightIntensityCommit={handleLightIntensityCommit}
+              specularIntensity={specularIntensity}
+              onSpecularIntensityUpdate={handleSpecularIntensityUpdate}
+              onSpecularIntensityCommit={handleSpecularIntensityCommit}
+              useCustomWaterColor={useCustomWaterColor}
+              onToggleCustomWaterColor={handleToggleCustomWaterColor}
+              waterColorShallow={waterColorShallow}
+              onWaterColorShallowChange={handleWaterColorShallowChange}
+              waterColorDeep={waterColorDeep}
+              onWaterColorDeepChange={handleWaterColorDeepChange}
             />
           </FloatingWindow>
         )}

@@ -6,12 +6,26 @@ import React from 'react';
 import WebGLWater from '../Package/WebGLWater.tsx';
 
 interface StageProps {
-  lightAzimuth: number;
-  lightElevation: number;
+  lightPosition: { x: number; y: number; z: number };
   skyPreset: string;
+  lightIntensity: number;
+  specularIntensity: number;
+  useCustomWaterColor: boolean;
+  waterColorShallow: string;
+  waterColorDeep: string;
+  sceneApiRef: React.RefObject<any>;
 }
 
-const Stage = ({ lightAzimuth, lightElevation, skyPreset }: StageProps) => {
+const Stage = ({ 
+    lightPosition,
+    skyPreset, 
+    lightIntensity,
+    specularIntensity,
+    useCustomWaterColor,
+    waterColorShallow,
+    waterColorDeep,
+    sceneApiRef,
+}: StageProps) => {
   return (
     <div style={{ 
         position: 'relative', 
@@ -19,9 +33,14 @@ const Stage = ({ lightAzimuth, lightElevation, skyPreset }: StageProps) => {
         height: '100%',
     }}>
         <WebGLWater 
-            lightAzimuth={lightAzimuth}
-            lightElevation={lightElevation}
+            lightPosition={lightPosition}
             skyPreset={skyPreset}
+            lightIntensity={lightIntensity}
+            specularIntensity={specularIntensity}
+            useCustomWaterColor={useCustomWaterColor}
+            waterColorShallow={waterColorShallow}
+            waterColorDeep={waterColorDeep}
+            sceneApiRef={sceneApiRef}
         />
     </div>
   );

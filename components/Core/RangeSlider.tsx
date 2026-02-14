@@ -10,11 +10,13 @@ interface RangeSliderProps {
   label: string;
   motionValue: MotionValue<number>;
   onCommit: (value: number) => void;
+  onUpdate?: (value: number) => void; // For real-time updates
   min?: number;
   max?: number;
+  step?: number;
 }
 
-const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit, min = 0, max = 100 }) => {
+const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit, onUpdate, min = 0, max = 100, step = 1 }) => {
   const { theme } = useTheme();
   const trackRef = useRef<HTMLDivElement>(null);
   const [internalValue, setInternalValue] = useState(motionValue.get());
@@ -34,10 +36,19 @@ const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit,
     if (!trackRef.current) return;
     const rect = trackRef.current.getBoundingClientRect();
     const percent = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
-    const newValue = Math.round(min + percent * (max - min));
     
+    const range = max - min;
+    let newValue = min + percent * range;
+    
+    // Snap to step
+    newValue = Math.round(newValue / step) * step;
+    
+    // Clamp to min/max to prevent floating point errors from pushing it out of bounds
+    newValue = Math.max(min, Math.min(max, newValue));
+
     setInternalValue(newValue);
-    motionValue.set(newValue); // Real-time update
+    motionValue.set(newValue); // Update motion value for visual feedback
+    if (onUpdate) onUpdate(newValue); // Fire real-time update
   };
 
   const handlePointerDown = (e: React.PointerEvent) => {
@@ -56,11 +67,12 @@ const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit,
     if (isDragging) {
       setIsDragging(false);
       trackRef.current?.releasePointerCapture(e.pointerId);
-      onCommit(internalValue); // Commit only on release
+      onCommit(motionValue.get()); // Commit final value
     }
   };
 
   const percentage = ((internalValue - min) / (max - min)) * 100;
+  const numDecimalPlaces = String(step).includes('.') ? String(step).split('.')[1].length : 0;
 
   const numberInputStyle: React.CSSProperties = {
     width: '60px',
@@ -140,17 +152,19 @@ const RangeSlider: React.FC<RangeSliderProps> = ({ label, motionValue, onCommit,
           type="number"
           min={min}
           max={max}
-          value={internalValue}
+          step={step}
+          value={internalValue.toFixed(numDecimalPlaces)}
           onChange={(e) => {
-             const v = parseInt(e.target.value, 10) || 0;
+             const v = parseFloat(e.target.value) || 0;
              const clamped = Math.min(Math.max(v, min), max);
              setInternalValue(clamped);
              motionValue.set(clamped);
+             if (onUpdate) onUpdate(clamped);
           }}
-          onBlur={() => onCommit(internalValue)}
+          onBlur={() => onCommit(motionValue.get())}
           onKeyDown={(e) => {
               if (e.key === 'Enter') {
-                  onCommit(internalValue);
+                  onCommit(motionValue.get());
                   (e.target as HTMLInputElement).blur();
               }
           }}
