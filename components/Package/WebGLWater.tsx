@@ -98,8 +98,10 @@ const sphereShaderFs = `
 
 const waterVertexShader = `
   uniform sampler2D u_waterTexture;
+  uniform mat4 u_textureMatrix;
   varying vec2 v_uv;
   varying vec3 v_worldPos;
+  varying vec4 v_reflectionUv;
 
   void main() {
     v_uv = uv;
@@ -108,12 +110,15 @@ const waterVertexShader = `
     // The plane is in XY, but rotated to be in XZ. The plane's local Z is along the world Y axis.
     pos.z += info.r;
     v_worldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
+    v_reflectionUv = u_textureMatrix * vec4(v_worldPos, 1.0);
     gl_Position = projectionMatrix * viewMatrix * vec4(v_worldPos, 1.0);
   }
 `;
 
 const waterFragmentShader = `
+  #include <packing>
   uniform sampler2D u_waterTexture;
+  uniform sampler2D u_reflectionTexture;
   uniform sampler2D u_tiles;
   uniform samplerCube u_skybox;
   uniform vec3 u_lightDir;
@@ -123,6 +128,7 @@ const waterFragmentShader = `
 
   varying vec2 v_uv;
   varying vec3 v_worldPos;
+  varying vec4 v_reflectionUv;
 
   const float IOR_AIR = 1.0;
   const float IOR_WATER = 1.333;
@@ -185,7 +191,7 @@ const waterFragmentShader = `
     return wallColor * light_level;
   }
 
-  vec3 getSurfaceRayColor(vec3 origin, vec3 ray, vec3 waterColor) {
+  vec3 getRefractedColor(vec3 origin, vec3 ray, vec3 waterColor) {
     vec3 color;
     float sphere_t = intersectSphere(origin, ray, u_sphereCenter, u_sphereRadius);
     
@@ -213,12 +219,11 @@ const waterFragmentShader = `
     
     vec3 incidentRay = normalize(u_cameraPos - v_worldPos);
     
-    vec3 reflectedRay = reflect(-incidentRay, worldNormal);
     vec3 refractedRay = refract(-incidentRay, worldNormal, IOR_AIR / IOR_WATER);
     float fresnel = mix(0.25, 1.0, pow(1.0 - dot(worldNormal, incidentRay), 3.0));
     
-    vec3 reflectedColor = getSurfaceRayColor(v_worldPos, reflectedRay, abovewaterColor);
-    vec3 refractedColor = getSurfaceRayColor(v_worldPos, refractedRay, abovewaterColor);
+    vec3 reflectedColor = texture2DProj(u_reflectionTexture, v_reflectionUv).rgb;
+    vec3 refractedColor = getRefractedColor(v_worldPos, refractedRay, abovewaterColor);
     
     vec3 color = mix(refractedColor, reflectedColor, fresnel);
     
@@ -363,12 +368,30 @@ const WebGLWater = () => {
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(currentMount.clientWidth, currentMount.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.localClippingEnabled = true; // For reflection plane
     currentMount.appendChild(renderer.domElement);
     waterSimulation.init(renderer);
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0, 0);
+
+    // --- Reflection setup ---
+    const reflectionRenderTarget = new THREE.WebGLRenderTarget(512, 512, {
+        format: THREE.RGBAFormat,
+        type: THREE.HalfFloatType,
+    });
+    const reflector = new THREE.PerspectiveCamera();
+    const reflectorPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+    const textureMatrix = new THREE.Matrix4();
+    const reflectorWorldPosition = new THREE.Vector3();
+    const cameraWorldPosition = new THREE.Vector3();
+    const rotationMatrix = new THREE.Matrix4();
+    const lookAtPosition = new THREE.Vector3(0, 0, -1);
+    const clipPlane = new THREE.Vector4();
+    const view = new THREE.Vector3();
+    const target = new THREE.Vector3();
+    const q = new THREE.Quaternion();
 
     // --- Sky and Environment Map Setup ---
     const sky = new Sky();
@@ -398,6 +421,8 @@ const WebGLWater = () => {
     const waterMaterial = new THREE.ShaderMaterial({
         uniforms: { 
             u_waterTexture: { value: null }, 
+            u_reflectionTexture: { value: reflectionRenderTarget.texture },
+            u_textureMatrix: { value: textureMatrix },
             u_tiles: { value: tilesTexture },
             u_skybox: { value: textureCube }, 
             u_lightDir: { value: sunPosition }, 
@@ -517,6 +542,49 @@ const WebGLWater = () => {
     currentMount.addEventListener('pointermove', onPointerMove);
     window.addEventListener('pointerup', onPointerUp);
 
+    const updateReflector = () => {
+        reflectorWorldPosition.setFromMatrixPosition(waterMesh.matrixWorld);
+        cameraWorldPosition.setFromMatrixPosition(camera.matrixWorld);
+        rotationMatrix.extractRotation(waterMesh.matrixWorld);
+        
+        const normal = new THREE.Vector3(0, 1, 0); // Water plane normal
+        normal.applyMatrix4(rotationMatrix);
+
+        view.subVectors(reflectorWorldPosition, cameraWorldPosition);
+        view.reflect(normal).negate();
+        view.add(reflectorWorldPosition);
+
+        rotationMatrix.extractRotation(camera.matrixWorld);
+        lookAtPosition.set(0, 0, -1);
+        lookAtPosition.applyMatrix4(rotationMatrix);
+        lookAtPosition.add(cameraWorldPosition);
+
+        target.subVectors(reflectorWorldPosition, lookAtPosition);
+        target.reflect(normal).negate();
+        target.add(reflectorWorldPosition);
+
+        reflector.position.copy(view);
+        reflector.up.set(0, 1, 0);
+        reflector.up.applyMatrix4(rotationMatrix);
+        reflector.up.reflect(normal);
+        reflector.lookAt(target);
+
+        reflector.far = camera.far;
+        reflector.near = camera.near;
+        reflector.aspect = camera.aspect;
+        reflector.fov = camera.fov;
+        reflector.updateProjectionMatrix();
+        
+        textureMatrix.set(
+            0.5, 0.0, 0.0, 0.5,
+            0.0, 0.5, 0.0, 0.5,
+            0.0, 0.0, 0.5, 0.5,
+            0.0, 0.0, 0.0, 1.0
+        );
+        textureMatrix.multiply(reflector.projectionMatrix);
+        textureMatrix.multiply(reflector.matrixWorldInverse);
+    };
+
     const animate = () => {
       controls.update();
       if (oldSpherePos.distanceTo(sphere.position) > 0.001) {
@@ -529,6 +597,20 @@ const WebGLWater = () => {
       }
       waterSimulation.step();
       waterSimulation.updateNormals();
+      
+      // Reflection Pass
+      waterMesh.visible = false;
+      poolMaterial.side = THREE.FrontSide; // Render exterior for reflection
+      updateReflector();
+      renderer.clippingPlanes = [reflectorPlane];
+      renderer.setRenderTarget(reflectionRenderTarget);
+      renderer.render(scene, reflector);
+      renderer.setRenderTarget(null);
+      renderer.clippingPlanes = [];
+      poolMaterial.side = THREE.BackSide; // Render interior for main render
+      waterMesh.visible = true;
+
+      // Main Render Pass
       waterMaterial.uniforms.u_waterTexture.value = waterSimulation.getTexture();
       waterMaterial.uniforms.u_cameraPos.value.copy(camera.position);
       waterMaterial.uniforms.u_sphereCenter.value.copy(sphere.position);
@@ -543,6 +625,7 @@ const WebGLWater = () => {
       window.removeEventListener('pointerup', onPointerUp);
       cancelAnimationFrame(animId);
       waterSimulation.dispose();
+      reflectionRenderTarget.dispose();
       renderer.dispose();
       currentMount.removeChild(renderer.domElement);
     };
