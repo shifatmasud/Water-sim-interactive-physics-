@@ -128,6 +128,7 @@ const waterFragmentShader = `
   uniform sampler2D u_tiles;
   uniform samplerCube u_skybox;
   uniform vec3 u_lightDir;
+  uniform vec3 u_lightColor;
   uniform vec3 u_cameraPos;
   uniform vec3 u_sphereCenter;
   uniform float u_sphereRadius;
@@ -176,22 +177,28 @@ const waterFragmentShader = `
     // Diffuse lighting
     vec3 sphereNormal = normalize(point - u_sphereCenter);
     float diffuse = max(0.0, dot(u_lightDir, sphereNormal));
-    color += vec3(1.0) * diffuse * 0.5;
+    color += u_lightColor * diffuse * 0.5;
 
     return color;
   }
 
   vec3 getWallColor(vec3 point) {
     vec3 wallColor;
+    vec3 normal;
     if (point.y < -poolHeight + 0.001) {
         wallColor = texture2D(u_tiles, point.xz * 0.5 + 0.5).rgb;
+        normal = vec3(0.0, 1.0, 0.0);
     } else if (abs(point.x) > (poolSize / 2.0) - 0.001) {
         wallColor = texture2D(u_tiles, point.yz * 0.5 + 0.5).rgb;
+        normal = vec3(-sign(point.x), 0.0, 0.0);
     } else {
         wallColor = texture2D(u_tiles, point.zy * 0.5 + 0.5).rgb;
+        normal = vec3(0.0, 0.0, -sign(point.z));
     }
     
-    float light_level = 1.0;
+    float diffuse = max(0.0, dot(u_lightDir, normal));
+    float ambient = 0.4;
+    float light_level = diffuse * 0.6 + ambient;
     
     return wallColor * light_level;
   }
@@ -210,7 +217,7 @@ const waterFragmentShader = `
       color = getWallColor(origin + ray * pool_ts.y);
     } else {
       color = textureCube(u_skybox, ray).rgb;
-      color += vec3(1.0) * pow(max(0.0, dot(u_lightDir, ray)), 2000.0) * 5.0;
+      color += u_lightColor * pow(max(0.0, dot(u_lightDir, ray)), 2000.0) * 5.0;
     }
     
     if (ray.y < 0.0) color *= waterColor;
@@ -427,7 +434,8 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
             u_textureMatrix: { value: textureMatrix },
             u_tiles: { value: tilesTexture },
             u_skybox: { value: textureCube }, 
-            u_lightDir: { value: sunPosition }, 
+            u_lightDir: { value: sunPosition },
+            u_lightColor: { value: new THREE.Color(0xffffff) },
             u_cameraPos: { value: camera.position },
             u_sphereCenter: { value: new THREE.Vector3() },
             u_sphereRadius: { value: 0.0 }
@@ -436,11 +444,9 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
         fragmentShader: waterFragmentShader,
     });
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
-    scene.add(ambientLight);
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-    directionalLight.position.copy(sunPosition);
-    scene.add(directionalLight);
+    const sunLight = new THREE.DirectionalLight(0xffffff, 2.0);
+    sunLight.position.copy(sunPosition);
+    scene.add(sunLight);
 
     const poolSize = 2;
     const poolMaterial = new THREE.MeshStandardMaterial({
@@ -588,7 +594,7 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
       renderer.render(scene, camera);
     };
     
-    sceneObjects.current = { sky, sunPosition, waterMaterial, ambientLight, directionalLight, cubeCamera, renderer, skyScene };
+    sceneObjects.current = { sky, sunPosition, waterMaterial, sunLight, cubeCamera, renderer, skyScene };
     const animId = requestAnimationFrame(animate);
 
     return () => {
@@ -604,7 +610,7 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
   }, [waterSimulation]);
 
   useEffect(() => {
-    const { sky, sunPosition, waterMaterial, directionalLight } = sceneObjects.current;
+    const { sky, sunPosition, waterMaterial, sunLight } = sceneObjects.current;
     if (!sky) return;
 
     const elevationRad = THREE.MathUtils.degToRad(lightElevation);
@@ -617,11 +623,11 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
     
     sky.material.uniforms['sunPosition'].value.copy(sunPosition);
     waterMaterial.uniforms.u_lightDir.value.copy(sunPosition);
-    directionalLight.position.copy(sunPosition);
+    sunLight.position.copy(sunPosition);
   }, [lightAzimuth, lightElevation]);
 
   useEffect(() => {
-    const { sky, ambientLight, directionalLight, cubeCamera, renderer, skyScene } = sceneObjects.current;
+    const { sky, sunLight, waterMaterial, cubeCamera, renderer, skyScene } = sceneObjects.current;
     if (!sky) return;
 
     const preset = skyPresets[skyPreset as keyof typeof skyPresets] || skyPresets.default;
@@ -631,9 +637,18 @@ const WebGLWater = ({ lightAzimuth, lightElevation, skyPreset }: WebGLWaterProps
     sky.material.uniforms['rayleigh'].value = preset.rayleigh;
     sky.material.uniforms['mieCoefficient'].value = preset.mieCoefficient;
     sky.material.uniforms['mieDirectionalG'].value = preset.mieDirectionalG;
+    
+    if (isNight) {
+      sunLight.color.set(0x88aaff);
+      sunLight.intensity = 0.3;
+    } else {
+      sunLight.color.set(0xffffff);
+      sunLight.intensity = 2.0;
+    }
 
-    ambientLight.intensity = isNight ? 0.1 : 0.7;
-    directionalLight.intensity = isNight ? 0.2 : 1.2;
+    if (waterMaterial) {
+      waterMaterial.uniforms.u_lightColor.value.copy(sunLight.color);
+    }
 
     if (renderer && skyScene) {
         cubeCamera.update(renderer, skyScene);
