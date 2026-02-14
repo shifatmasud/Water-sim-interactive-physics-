@@ -417,17 +417,29 @@ const WebGLWater = () => {
     scene.add(directionalLight);
 
     const poolSize = 2;
-    const poolMaterial = new THREE.MeshStandardMaterial({ 
-      map: tilesTexture, 
-      envMap: textureCube, 
-      roughness: 0.1, 
-      metalness: 0.1 
+    // The pool material needs to render the BACK side of the faces to be visible from the inside.
+    const poolMaterial = new THREE.MeshStandardMaterial({
+      map: tilesTexture,
+      envMap: textureCube,
+      roughness: 0.1,
+      metalness: 0.1,
+      side: THREE.BackSide // Render the inside of the box
     });
-    
+
     const poolGeo = new THREE.BoxGeometry(poolSize, 1, poolSize);
-    const poolMesh = new THREE.Mesh(poolGeo, poolMaterial);
+
+    // Use an array of materials to make the top face invisible.
+    // The order is: right, left, top, bottom, front, back
+    const poolMesh = new THREE.Mesh(poolGeo, [
+      poolMaterial, // right
+      poolMaterial, // left
+      new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, side: THREE.DoubleSide }), // top (invisible)
+      poolMaterial, // bottom
+      poolMaterial, // front
+      poolMaterial  // back
+    ]);
     poolMesh.position.y = -0.5;
-    poolMesh.scale.set(1, -1, 1);
+    // The negative scale is no longer needed because THREE.BackSide handles the normal inversion for rendering.
     scene.add(poolMesh);
 
     const waterMesh = new THREE.Mesh(waterGeo, waterMaterial);
